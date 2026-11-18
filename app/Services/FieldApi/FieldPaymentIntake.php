@@ -106,9 +106,13 @@ final class FieldPaymentIntake
         if ($collectedAt->gt(now()->addMinutes(10))) {
             throw new FieldApiError('VALIDATION_FAILED', 'collected_at is in the future.', 422, ['collected_at' => (string) $input['collected_at']]);
         }
-        $oldest = $today->copy()->subDays(max(0, (int) config('field_api.max_backdate_days', 7)));
-        if ($collectedAt->copy()->startOfDay()->lt($oldest)) {
-            throw new FieldApiError('PERIOD_LOCKED', 'Collection date is older than the allowed back-date window.', 423, ['oldest_allowed' => $oldest->toDateString()]);
+        // No window unless FIELD_API_MAX_BACKDATE_DAYS is set (OD-28: any past date).
+        $window = config('field_api.max_backdate_days');
+        if ($window !== null) {
+            $oldest = $today->copy()->subDays(max(0, (int) $window));
+            if ($collectedAt->copy()->startOfDay()->lt($oldest)) {
+                throw new FieldApiError('PERIOD_LOCKED', 'Collection date is older than the allowed back-date window.', 423, ['oldest_allowed' => $oldest->toDateString()]);
+            }
         }
 
         $employee = Employee::query()->find((int) $input['collector_employee_id']);
