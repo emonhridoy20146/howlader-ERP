@@ -58,6 +58,17 @@ FIELD_API_RATE_PER_MINUTE=300
 
 Set `FIELD_API_ENABLED=false` and run `php artisan config:cache`. Every route then answers 404. The table can stay.
 
+## Changes
+
+- **2026-11-18, invoice viewer (field-api contract 1.14.0).** The customer read adds, all read-only and additive:
+  invoice `subtotal`, `tax_total`, `settlement_discount` (discounts given with live inbound payments) and `refunded`
+  (refunds of returns that were not rolled back); per line item `unit_price`, `discount_amount`, `service_charge`,
+  `tax_amount`; per installment plan `penalty_rate`; per schedule line `written_off` (from
+  `installment_writeoff_allocations`) and `payments` (from `installment_payment_allocations`: payment id, number,
+  date and the amount that went to that line, oldest first; removed payments are left out). No table, route,
+  model or setting changes, and no migration. Invoices imported from DiziCashier (`S-…`) were paid without
+  allocation rows, so their lines come with an empty `payments` list.
+
 ## Tests
 
 ```bash

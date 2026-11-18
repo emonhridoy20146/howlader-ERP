@@ -187,6 +187,25 @@ class FieldApiTest extends TestCase
         $this->assertSame('Test Collector', $row['collector_name']);
     }
 
+    public function test_schedule_lines_show_which_payment_paid_them_and_invoice_totals(): void
+    {
+        $paymentId = $this->api()->withHeaders(['Idempotency-Key' => (string) Str::uuid()])
+            ->postJson('/api/field/v1/payments', $this->paymentBody())->assertCreated()->json('data.id');
+
+        $inv = $this->api()->getJson('/api/field/v1/customers/'.$this->customer->id)->assertOk()->json('data.invoices.0');
+        $lines = $inv['installment_plan']['schedules'];
+        $this->assertSame([['payment_id' => $paymentId, 'payment_number' => Payment::query()->findOrFail($paymentId)->payment_number, 'payment_date' => now()->toDateString(), 'amount' => '1000.00']], $lines[0]['payments']);
+        $this->assertSame('500.00', $lines[1]['payments'][0]['amount']);
+        $this->assertSame([], $lines[2]['payments']);
+        $this->assertSame('0.00', $lines[0]['written_off']);
+        $this->assertIsString($inv['installment_plan']['penalty_rate']);
+        $this->assertEqualsWithDelta(0.0, (float) $inv['installment_plan']['penalty_rate'], 0.00001);
+        $this->assertSame('4000.00', $inv['subtotal']);
+        $this->assertSame('0.00', $inv['tax_total']);
+        $this->assertSame('0.00', $inv['settlement_discount']);
+        $this->assertSame('0.00', $inv['refunded']);
+    }
+
     public function test_any_past_date_is_accepted_by_default(): void
     {
         // OD-28 (owner, 2026-11-18): no back-date window unless FIELD_API_MAX_BACKDATE_DAYS is set.

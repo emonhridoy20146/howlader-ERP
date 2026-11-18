@@ -6,7 +6,9 @@ use App\Models\AuditLog;
 use App\Models\Customer;
 use App\Models\CustomerRiskSnapshot;
 use App\Models\FieldPaymentRequest;
+use App\Models\InstallmentPaymentAllocation;
 use App\Models\InstallmentSchedule;
+use App\Models\InstallmentWriteoffAllocation;
 use App\Models\Payment;
 use App\Models\SalesInvoice;
 use App\Services\InstallmentAdvanceService;
@@ -35,6 +37,9 @@ final class FieldCustomerPresenter
 
     /** @var array<int, string|null> payment id → payment date of removed field payments (set by present()). */
     private array $fieldDates = [];
+
+    /** @var array<int, float> schedule id → amount written off on that line (set by present()). */
+    private array $lineWriteoffs = [];
 
     /** SQL for "branch of the customer's latest invoice" — the fallback when customers.branch_id is NULL. */
     public static function fallbackBranchSql(): string
@@ -113,12 +118,26 @@ final class FieldCustomerPresenter
                 'lines.saleLineSerials' => fn ($q) => $q->whereNull('released_at'),
                 'lines.saleLineSerials.serialItem:id,serial_number',
                 'installmentPlan.schedules',
+                // Which payment paid which installment, and on what date (installment_payment_allocations).
+                'installmentPlan.schedules.paymentAllocations.payment:id,payment_number,payment_date,direction',
                 'guarantor',
             ])
             ->withSum('debtWriteoffs as written_off_sum', 'amount')
+            // Same sums the invoice page shows: settlement discounts of live inbound payments, refunds of returns not rolled back.
+            ->withSum(['paymentAllocations as settlement_discount_sum' => fn ($q) => $q->forRecordedInboundPayment()], 'settlement_discount')
+            ->withSum(['returnRefunds as refunded_sum' => fn ($q) => $q->whereHas('returnOrder', fn ($r) => $r->whereNull('rolled_back_at'))], 'paid_amount')
             ->orderBy('invoice_date')->orderBy('id')
             ->get();
         $invoicesByCustomer = $invoices->groupBy('customer_id');
+
+        $scheduleIds = $invoices->flatMap(fn (SalesInvoice $i) => $i->installmentPlan?->schedules->pluck('id') ?? [])->all();
+        $this->lineWriteoffs = $scheduleIds === [] ? [] : InstallmentWriteoffAllocation::query()
+            ->whereIn('installment_schedule_id', $scheduleIds)
+            ->groupBy('installment_schedule_id')
+            ->selectRaw('installment_schedule_id, SUM(amount) AS total')
+            ->pluck('total', 'installment_schedule_id')
+            ->mapWithKeys(fn ($total, $id) => [(int) $id => (float) $total])
+            ->all();
         $invoiceCustomer = $invoices->mapWithKeys(fn (SalesInvoice $i) => [(int) $i->id => (int) $i->customer_id]);
 
         $limit = max(1, (int) config('field_api.recent_payments_per_customer', 20));
@@ -236,11 +255,15 @@ final class FieldCustomerPresenter
             'status' => $i->status,
             'payment_status' => $i->payment_status,
             'collectable' => in_array($i->status, ['posted', 'active'], true) && $due > 0.009,
-            'grand_total' => self::money($i->grand_total),
+            'subtotal' => self::money($i->subtotal),
             'discount_total' => self::money($i->discount_total),
+            'tax_total' => self::money($i->tax_total),
+            'grand_total' => self::money($i->grand_total),
             'amount_paid' => self::money($i->amount_paid),
             'amount_due' => self::money($due),
             'written_off' => self::money($i->getAttribute('written_off_sum') ?? 0),
+            'settlement_discount' => self::money($i->getAttribute('settlement_discount_sum') ?? 0),
+            'refunded' => self::money($i->getAttribute('refunded_sum') ?? 0),
             'credit_due_date' => $i->credit_due_date?->toDateString(),
             'items' => $i->lines->map(fn ($l) => [
                 'line_id' => (int) $l->id,
@@ -248,6 +271,10 @@ final class FieldCustomerPresenter
                 'name' => $l->product?->name,
                 'model_number' => $l->product?->model_number,
                 'qty' => (int) $l->qty,
+                'unit_price' => self::money($l->unit_price),
+                'discount_amount' => self::money($l->discount_amount),
+                'service_charge' => self::money($l->service_charge),
+                'tax_amount' => self::money($l->tax_amount),
                 'line_total' => self::money($l->line_total),
                 'serials' => $l->saleLineSerials->map(fn ($s) => $s->serialItem?->serial_number)->filter()->values()->all(),
             ])->values()->all(),
@@ -263,6 +290,7 @@ final class FieldCustomerPresenter
                 'custom_days' => $i->installment_custom_days !== null ? (int) $i->installment_custom_days : null,
                 'installment_count' => $plan->schedules->count(),
                 'penalty_enabled' => (bool) $plan->penalty_enabled,
+                'penalty_rate' => $plan->penalty_rate !== null ? (string) $plan->penalty_rate : null,
                 'schedules' => $plan->schedules->map(fn (InstallmentSchedule $s) => [
                     'id' => (int) $s->id,
                     'installment_no' => (int) $s->installment_no,
@@ -271,12 +299,33 @@ final class FieldCustomerPresenter
                     'paid_amount' => self::money($s->paid_amount),
                     'late_fee_amount' => self::money($s->late_fee_amount),
                     'remaining_amount' => self::money($s->remainingDue()),
+                    'written_off' => self::money($this->lineWriteoffs[(int) $s->id] ?? 0),
+                    'payments' => $this->schedulePayments($s),
                     // Stored value; it can be stale (the overdue roll job does not always run). Clients compute their own.
                     'status' => $s->status,
                 ])->values()->all(),
             ] : null,
             'updated_at' => $i->updated_at?->toIso8601String(),
         ];
+    }
+
+    /**
+     * Payments that went to this installment line, oldest first. Allocation rows of a removed
+     * (hard-deleted) or outbound payment are left out.
+     *
+     * @return list<array<string, mixed>>
+     */
+    private function schedulePayments(InstallmentSchedule $s): array
+    {
+        return $s->paymentAllocations
+            ->filter(fn (InstallmentPaymentAllocation $a) => $a->payment instanceof Payment && $a->payment->direction === 'inbound')
+            ->sortBy(fn (InstallmentPaymentAllocation $a) => ($a->payment->payment_date?->toDateString() ?? '').'#'.str_pad((string) $a->payment_id, 12, '0', STR_PAD_LEFT))
+            ->map(fn (InstallmentPaymentAllocation $a) => [
+                'payment_id' => (int) $a->payment_id,
+                'payment_number' => $a->payment->payment_number,
+                'payment_date' => $a->payment->payment_date?->toDateString(),
+                'amount' => self::money($a->allocated_amount),
+            ])->values()->all();
     }
 
     /** Same order as SalesInvoice::collectionGuarantorDisplayParts(): invoice guarantor, else the customer's default. NID is never returned. */
