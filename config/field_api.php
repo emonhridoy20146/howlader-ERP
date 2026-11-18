@@ -19,7 +19,9 @@ return [
     'integration_user_id' => env('FIELD_API_USER_ID') !== null ? (int) env('FIELD_API_USER_ID') : null,
 
     // Oldest collection date (in days before today, Asia/Dhaka) the API accepts.
-    'max_backdate_days' => (int) env('FIELD_API_MAX_BACKDATE_DAYS', 7),
+    // Empty or unset = no limit (owner decision OD-28, 2026-11-18: a collection of any past date is accepted,
+    // as the office can with `backdate-sales-invoice`). A future date is always refused.
+    'max_backdate_days' => is_numeric(env('FIELD_API_MAX_BACKDATE_DAYS')) ? (int) env('FIELD_API_MAX_BACKDATE_DAYS') : null,
 
     'page_size_default' => 100,
     'page_size_max' => 200,

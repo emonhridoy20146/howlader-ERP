@@ -187,6 +187,17 @@ class FieldApiTest extends TestCase
         $this->assertSame('Test Collector', $row['collector_name']);
     }
 
+    public function test_any_past_date_is_accepted_by_default(): void
+    {
+        // OD-28 (owner, 2026-11-18): no back-date window unless FIELD_API_MAX_BACKDATE_DAYS is set.
+        $this->assertNull(config('field_api.max_backdate_days'));
+        $date = now()->subDays(45);
+        $res = $this->api()->withHeaders(['Idempotency-Key' => (string) Str::uuid()])
+            ->postJson('/api/field/v1/payments', $this->paymentBody(['collected_at' => $date->toIso8601String()]));
+        $res->assertStatus(201);
+        $this->assertSame($date->toDateString(), $res->json('data.payment_date'));
+    }
+
     public function test_business_errors(): void
     {
         $post = fn (array $over) => $this->api()->withHeaders(['Idempotency-Key' => (string) Str::uuid()])->postJson('/api/field/v1/payments', $this->paymentBody($over));
@@ -194,7 +205,10 @@ class FieldApiTest extends TestCase
         $post(['amount' => '3000.01'])->assertStatus(422)->assertJsonPath('error.code', 'AMOUNT_EXCEEDS_OUTSTANDING');
         $post(['method_type' => 'mobile_banking'])->assertStatus(422)->assertJsonPath('error.code', 'METHOD_NOT_AVAILABLE');
         $post(['collector_employee_id' => 99999])->assertStatus(422)->assertJsonPath('error.code', 'COLLECTOR_NOT_LINKED');
+        config(['field_api.max_backdate_days' => 7]);
         $post(['collected_at' => now()->subDays(30)->toIso8601String()])->assertStatus(423)->assertJsonPath('error.code', 'PERIOD_LOCKED');
+        config(['field_api.max_backdate_days' => null]);
+        $post(['collected_at' => now()->addDay()->toIso8601String()])->assertStatus(422)->assertJsonPath('error.code', 'VALIDATION_FAILED');
         $post(['customer_id' => 99999])->assertStatus(404)->assertJsonPath('error.code', 'PLAN_NOT_FOUND');
         $this->invoice->update(['status' => 'returned']);
         $post([])->assertStatus(422)->assertJsonPath('error.code', 'PLAN_CLOSED');

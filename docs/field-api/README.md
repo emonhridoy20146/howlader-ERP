@@ -46,9 +46,11 @@ FIELD_API_ENABLED=false
 FIELD_API_USER_ID=
 FIELD_API_TOKEN_SHA256=
 FIELD_API_TOKEN_NEXT_SHA256=
-FIELD_API_MAX_BACKDATE_DAYS=7
+FIELD_API_MAX_BACKDATE_DAYS=
 FIELD_API_RATE_PER_MINUTE=300
 ```
+
+`FIELD_API_MAX_BACKDATE_DAYS` empty means a collection of any past date is accepted (owner decision OD-28, as the office can with the back-date permission); a number limits it to that many days back. A date in the future is always refused.
 
 `FIELD_API_TOKEN_NEXT_SHA256` lets a new token work alongside the old one while field-api is switched over (run `field-api:setup` again to get a new token).
 
