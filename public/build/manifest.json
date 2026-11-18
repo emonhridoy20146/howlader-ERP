@@ -1,0 +1,23 @@
+{
+  "resources/css/app.css": {
+    "file": "assets/app-TQ9_uzHk.css",
+    "name": "app",
+    "names": [
+      "app.css"
+    ],
+    "src": "resources/css/app.css",
+    "isEntry": true
+  },
+  "resources/js/app.js": {
+    "file": "assets/app-Co734v3H.js",
+    "name": "app",
+    "src": "resources/js/app.js",
+    "isEntry": true
+  },
+  "resources/js/customer-risk.js": {
+    "file": "assets/customer-risk-D5_7qIa5.js",
+    "name": "customer-risk",
+    "src": "resources/js/customer-risk.js",
+    "isEntry": true
+  }
+}
