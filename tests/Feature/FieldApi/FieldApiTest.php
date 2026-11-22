@@ -187,6 +187,31 @@ class FieldApiTest extends TestCase
         $this->assertSame('Test Collector', $row['collector_name']);
     }
 
+    public function test_a_collector_without_an_erp_employee_is_posted_by_name_with_an_empty_referrer(): void
+    {
+        $key = (string) Str::uuid();
+        $body = $this->paymentBody(['collector_employee_id' => null, 'collector_name' => 'Rahim Field']);
+        $res = $this->api()->withHeaders(['Idempotency-Key' => $key])->postJson('/api/field/v1/payments', $body)->assertCreated();
+        $this->assertSame([['installment_no' => 1, 'amount' => '1000.00'], ['installment_no' => 2, 'amount' => '500.00']], $res->json('data.allocations'));
+        $payment = Payment::query()->findOrFail($res->json('data.id'));
+        $this->assertNull($payment->referrer_employee_id);
+        $this->assertSame('Rahim Field', $payment->reference_no);
+        $this->assertStringContainsString('Collected by Rahim Field (no ERP employee)', (string) $payment->notes);
+        $this->assertSame($this->integration->id, (int) $payment->recorded_by);
+        $this->api()->withHeaders(['Idempotency-Key' => $key])->postJson('/api/field/v1/payments', $body)
+            ->assertOk()->assertJsonPath('idempotent_replay', true);
+
+        $row = collect($this->api()->getJson('/api/field/v1/customers/'.$this->customer->id)->json('data.recent_payments'))->firstWhere('id', $payment->id);
+        $this->assertNull($row['collector_employee_id']);
+        $this->assertSame('Rahim Field', $row['collector_name']);
+
+        // neither an employee nor a name: refused, nothing stored
+        $this->api()->withHeaders(['Idempotency-Key' => (string) Str::uuid()])
+            ->postJson('/api/field/v1/payments', $this->paymentBody(['collector_employee_id' => null, 'amount' => '10.00']))
+            ->assertStatus(422)->assertJsonPath('error.code', 'VALIDATION_FAILED');
+        $this->assertSame(1, Payment::query()->where('direction', 'inbound')->count());
+    }
+
     public function test_schedule_lines_show_which_payment_paid_them_and_invoice_totals(): void
     {
         $paymentId = $this->api()->withHeaders(['Idempotency-Key' => (string) Str::uuid()])

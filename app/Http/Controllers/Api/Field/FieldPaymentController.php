@@ -34,8 +34,9 @@ class FieldPaymentController extends Controller
             'method_type' => ['required', 'in:'.implode(',', FieldPaymentIntake::METHOD_TYPES)],
             'payment_method_id' => ['nullable', 'integer', 'min:1'],
             'mobile_provider' => ['nullable', 'string', 'in:bkash,nagad,rocket'],
-            'collector_employee_id' => ['required', 'integer', 'min:1'],
-            'collector_name' => ['nullable', 'string', 'max:100'],
+            // 2026-11-22 (owner): a field user with no ERP employee is posted by name; the payment's referrer stays empty.
+            'collector_employee_id' => ['nullable', 'integer', 'min:1', 'required_without:collector_name'],
+            'collector_name' => ['nullable', 'string', 'max:100', 'required_without:collector_employee_id'],
             'transaction_ref' => ['nullable', 'string', 'max:100'],
             'field_receipt_no' => ['required', 'string', 'max:40'],
             'field_collection_id' => ['nullable', 'string', 'max:64'],
