@@ -382,7 +382,8 @@ final class FieldCustomerPresenter
             'payment_method_name' => $p->paymentMethodRef?->name,
             'payment_method_type' => $p->paymentMethodRef?->type,
             'collector_employee_id' => $p->referrer_employee_id !== null ? (int) $p->referrer_employee_id : null,
-            'collector_name' => $employee?->fullName(),
+            // a field payment without an ERP employee carries the collector's name as its reference
+            'collector_name' => $employee?->fullName() ?? (isset($fieldKeys[(int) $p->id]) ? $p->reference_no : null),
             'reference_no' => $p->reference_no,
             'is_advance' => InstallmentAdvanceService::isAdvanceReference($p->reference_no),
             'source' => isset($fieldKeys[(int) $p->id]) ? 'field_app' : 'office',

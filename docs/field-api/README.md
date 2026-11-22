@@ -60,6 +60,14 @@ Set `FIELD_API_ENABLED=false` and run `php artisan config:cache`. Every route th
 
 ## Changes
 
+- **2026-11-22, collector without an ERP employee (field-api contract 1.35.0, ADR-049 there).** `POST /payments` takes
+  `collector_employee_id` OR `collector_name` (at least one; 422 `VALIDATION_FAILED` without both). A given employee id must
+  still be an active employee (`COLLECTOR_NOT_LINKED` otherwise). Without one, the payment is made with an empty referrer
+  (`payments.referrer_employee_id` is nullable; the ERP's own advance payments already do this, and the reports show such
+  payments under "none"), `reference_no` is the collector's name and the notes say `Collected by <name> (no ERP employee)`,
+  so the office always sees who collected it. The customer read returns that name as `collector_name` for such field
+  payments. Only `FieldPaymentController`, `FieldPaymentIntake` and `FieldCustomerPresenter` change: no table, migration,
+  route, model, setting or office screen. The idempotency hash is unchanged for requests that send an employee id.
 - **2026-11-18, invoice viewer (field-api contract 1.14.0).** The customer read adds, all read-only and additive:
   invoice `subtotal`, `tax_total`, `settlement_discount` (discounts given with live inbound payments) and `refunded`
   (refunds of returns that were not rolled back); per line item `unit_price`, `discount_amount`, `service_charge`,
@@ -75,4 +83,4 @@ Set `FIELD_API_ENABLED=false` and run `php artisan config:cache`. Every route th
 php artisan test tests/Feature/FieldApi
 ```
 
-All 6 pass on a copy of the real data, and the rest of the suite gives the same result with and without this module.
+All 9 pass (`php artisan test tests/Feature/FieldApi`). The 2026-11-22 change touches only the three field API files above.

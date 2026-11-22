@@ -115,9 +115,19 @@ final class FieldPaymentIntake
             }
         }
 
-        $employee = Employee::query()->find((int) $input['collector_employee_id']);
-        if (! $employee instanceof Employee || ! $employee->is_active || $employee->employment_status !== 'active') {
-            throw new FieldApiError('COLLECTOR_NOT_LINKED', 'Collector is not an active ERP employee.', 422, ['collector_employee_id' => (int) $input['collector_employee_id']]);
+        // A given employee must be an active ERP employee. Without one (a field user not in the ERP's HR), the
+        // collector is known by name only: the payment's referrer stays empty (the column is nullable, as on the
+        // ERP's own advance payments) and the name is the reference and part of the notes.
+        $employee = null;
+        if (! empty($input['collector_employee_id'])) {
+            $employee = Employee::query()->find((int) $input['collector_employee_id']);
+            if (! $employee instanceof Employee || ! $employee->is_active || $employee->employment_status !== 'active') {
+                throw new FieldApiError('COLLECTOR_NOT_LINKED', 'Collector is not an active ERP employee.', 422, ['collector_employee_id' => (int) $input['collector_employee_id']]);
+            }
+        }
+        $collectorName = trim((string) ($input['collector_name'] ?? ''));
+        if ($employee === null && $collectorName === '') {
+            throw new FieldApiError('COLLECTOR_NOT_LINKED', 'Collector has no ERP employee and no name.', 422);
         }
 
         $method = $this->resolveMethod(
@@ -136,17 +146,18 @@ final class FieldPaymentIntake
         $notes = trim(implode(' · ', array_filter([
             '[field_app]',
             'Receipt '.$input['field_receipt_no'],
+            $employee === null ? 'Collected by '.$collectorName.' (no ERP employee)' : null,
             ! empty($input['transaction_ref']) ? 'Txn '.$input['transaction_ref'] : null,
             ! empty($input['note']) ? (string) $input['note'] : null,
         ])));
 
         try {
-            $response = DB::transaction(function () use ($invoice, $amount, $method, $input, $employee, $paymentDate, $notes, $actor, $key, $hash) {
+            $response = DB::transaction(function () use ($invoice, $amount, $method, $input, $employee, $collectorName, $paymentDate, $notes, $actor, $key, $hash) {
                 $payment = $this->payments->recordAndAllocate($invoice, [
                     'amount' => $amount,
                     'payment_method_id' => $method->id,
-                    'reference' => mb_substr((string) ($input['collector_name'] ?? $employee->fullName()), 0, 100),
-                    'referrer_employee_id' => $employee->id,
+                    'reference' => mb_substr($collectorName !== '' ? $collectorName : (string) $employee?->fullName(), 0, 100),
+                    'referrer_employee_id' => $employee?->id,
                     'date' => $paymentDate,
                     'installment_target' => 'waterfall',
                     'notes' => $notes,
@@ -260,7 +271,7 @@ final class FieldPaymentIntake
             'payment_method_id' => isset($input['payment_method_id']) ? (int) $input['payment_method_id'] : null,
             'transaction_ref' => isset($input['transaction_ref']) && $input['transaction_ref'] !== '' ? (string) $input['transaction_ref'] : null,
             'collected_at' => Carbon::parse((string) $input['collected_at'])->utc()->format('Y-m-d\TH:i:s\Z'),
-            'collector_employee_id' => (int) $input['collector_employee_id'],
+            'collector_employee_id' => (int) ($input['collector_employee_id'] ?? 0),
         ];
 
         return hash('sha256', json_encode($norm, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES));
