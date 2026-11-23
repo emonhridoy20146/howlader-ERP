@@ -98,10 +98,12 @@ final class FieldCustomerPresenter
     }
 
     /**
+     * $allInvoiceTypes = true also returns cash invoices (field `invoices=all`); default: installment and credit only.
+     *
      * @param Collection<int, Customer> $customers
      * @return list<array<string, mixed>>
      */
-    public function present(Collection $customers): array
+    public function present(Collection $customers, bool $allInvoiceTypes = false): array
     {
         if ($customers->isEmpty()) {
             return [];
@@ -111,7 +113,7 @@ final class FieldCustomerPresenter
 
         $invoices = SalesInvoice::query()
             ->whereIn('customer_id', $ids)
-            ->whereIn('sale_type', self::RECEIVABLE_TYPES)
+            ->when(! $allInvoiceTypes, fn ($q) => $q->whereIn('sale_type', self::RECEIVABLE_TYPES))
             ->where('status', '!=', 'draft')
             ->with([
                 'lines.product:id,name,model_number',
