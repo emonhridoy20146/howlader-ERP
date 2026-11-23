@@ -155,6 +155,32 @@ class FieldApiTest extends TestCase
         $this->api()->getJson('/api/field/v1/customers?branch_id=999')->assertOk()->assertJsonCount(0, 'data');
     }
 
+    public function test_invoices_all_adds_cash_customers_and_cash_invoices(): void
+    {
+        $cashBuyer = Customer::create(['customer_code' => 'CUS-T2', 'name' => 'Cash Buyer', 'phone' => '01700000009', 'branch_id' => $this->branch->id, 'is_active' => true, 'outstanding_balance' => 0]);
+        SalesInvoice::create([
+            'invoice_number' => 'INV-C1', 'branch_id' => $this->branch->id, 'customer_id' => $cashBuyer->id, 'invoice_date' => now()->toDateString(),
+            'sale_type' => 'cash', 'status' => 'posted', 'payment_status' => 'paid', 'subtotal' => 500, 'discount_total' => 0, 'tax_total' => 0,
+            'grand_total' => 500, 'amount_paid' => 500, 'amount_due' => 0, 'created_by' => $this->invoice->created_by,
+        ]);
+
+        // Default (receivables): the cash-only customer is not listed.
+        $this->api()->getJson('/api/field/v1/customers')->assertOk()->assertJsonCount(1, 'data');
+
+        // scope=all lists every customer; invoices=all also returns cash invoices.
+        $res = $this->api()->getJson('/api/field/v1/customers?scope=all&invoices=all')->assertOk()->assertJsonCount(2, 'data');
+        $cash = collect($res->json('data'))->firstWhere('id', $cashBuyer->id);
+        $this->assertSame('cash', $cash['invoices'][0]['sale_type']);
+        $this->assertFalse($cash['invoices'][0]['collectable']);
+
+        // scope=all without invoices=all keeps the old invoice filter (installment and credit only).
+        $old = collect($this->api()->getJson('/api/field/v1/customers?scope=all')->json('data'))->firstWhere('id', $cashBuyer->id);
+        $this->assertSame([], $old['invoices']);
+
+        $this->api()->getJson('/api/field/v1/customers/'.$cashBuyer->id.'?invoices=all')->assertOk()->assertJsonPath('data.invoices.0.sale_type', 'cash');
+        $this->api()->getJson('/api/field/v1/customers?invoices=bogus')->assertStatus(422);
+    }
+
     public function test_post_payment_is_idempotent_and_follows_erp_rules(): void
     {
         $key = (string) Str::uuid();

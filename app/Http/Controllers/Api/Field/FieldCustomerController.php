@@ -24,6 +24,7 @@ class FieldCustomerController extends Controller
             'branch_id' => ['nullable', 'integer', 'min:1'],
             'updated_since' => ['nullable', 'date'],
             'scope' => ['nullable', 'in:receivables,all'],
+            'invoices' => ['nullable', 'in:receivables,all'],
             'page' => ['nullable', 'array'],
             'page.size' => ['nullable', 'integer', 'min:1', 'max:'.(int) config('field_api.page_size_max', 200)],
             'page.cursor' => ['nullable', 'string', 'max:200'],
@@ -49,7 +50,7 @@ class FieldCustomerController extends Controller
         $page = $customers->take($size);
 
         return response()->json([
-            'data' => $this->presenter->present($page),
+            'data' => $this->presenter->present($page, $request->query('invoices') === 'all'),
             'meta' => [
                 'next_cursor' => $hasMore ? self::encodeCursor((int) $page->last()->id) : null,
                 'server_time' => $serverTime,
@@ -58,14 +59,14 @@ class FieldCustomerController extends Controller
         ]);
     }
 
-    public function show(int $customerId): JsonResponse
+    public function show(Request $request, int $customerId): JsonResponse
     {
         $customer = $this->presenter->baseQuery('all')->where('customers.id', $customerId)->first();
         if (! $customer instanceof Customer) {
             return (new FieldApiError('CUSTOMER_NOT_FOUND', 'Customer not found.', 404))->toResponse();
         }
 
-        return response()->json(['data' => $this->presenter->present(collect([$customer]))[0]]);
+        return response()->json(['data' => $this->presenter->present(collect([$customer]), $request->query('invoices') === 'all')[0]]);
     }
 
     /** Full inbound payment history, newest first (cursor = last payment id seen). */
